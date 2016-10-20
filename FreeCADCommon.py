@@ -270,14 +270,19 @@ def simpleBoolean(workpiece, baseName, boolOp, planeOrigin, planeOrientation, sk
     return workpiece
 
 
-# This is done by rotating a vector
-def rotationToNormal(rotation):
+def rotateVector(v, rotation):
     matrix = fc.Placement(fc.Vector(0,0,0), rotation).toMatrix()
 
-    vector = fc.Placement(fc.Vector(0,0,1), fc.Rotation(0,0,0)).toMatrix()
-
+    vector = fc.Placement(v, fc.Rotation(0,0,0)).toMatrix()
     matrixOut = matrix*vector
-    vectorOut = fc.Placement(matrixOut).Base.normalize()
+    vectorOut = fc.Placement(matrixOut).Base
+    return vectorOut
+
+
+# This is done by rotating a vector
+def rotationToNormal(rotation):
+    vector = rotateVector(fc.Vector(0,0,1), rotation)
+    vectorOut = vector.normalize()
     return vectorOut
 
 
@@ -521,3 +526,13 @@ def newHollowCylinder(name, innerRadius, outerRadius, height, placement):
     cylinder = newCylinder(name+"Outer", outerRadius, height, placement)
     cylinder = cut(name, cylinder, innerCylinder)
     return cylinder
+
+
+def assertCleanDocument():
+    if (None == fc.ActiveDocument):
+        name = "Unnamed"
+        fc.newDocument(name)
+        fc.setActiveDocument(name)
+    else:
+        deleteAll()
+    return
