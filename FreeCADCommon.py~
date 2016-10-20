@@ -1,19 +1,53 @@
 import FreeCAD as fc
-import Part, Sketcher, Draft
-
+import Part, Sketcher, Draft, Mesh
 import math
 
 
 def newObject(feature, name):
     obj = fc.ActiveDocument.getObject(name)
-    if (obj == None):
-        obj = fc.ActiveDocument.addObject(feature, name)
+    # it is probably best to delete it if it exists, in order to start from a clean slate
+    if (obj != None):
+        fc.ActiveDocument.removeObject(name)
+    obj = fc.ActiveDocument.addObject(feature, name)
+
     return obj
 
 
 def recompute():
     fc.ActiveDocument.recompute()
 
+
+def show(obj):
+    obj.ViewObject.show()
+    return
+
+def hide(obj):
+    obj.ViewObject.hide()
+    return
+
+def hideAll():
+    for o in fc.ActiveDocument.Objects:
+        hide(o)
+    return 
+
+def showOnly(obj):
+    hideAll()
+    show(obj)
+    return
+
+def deleteAll():
+    for o in fc.ActiveDocument.Objects:
+        name = o.Name
+        fc.ActiveDocument.removeObject(name)
+    return
+
+def newCylinder(name, radius, height, placement):
+    cylinder = newObject("Part::Cylinder", name)
+    cylinder.Label = name
+    cylinder.Radius = radius
+    cylinder.Height = height
+    cylinder.Placement = placement
+    return cylinder
 
 def newBox(name, boxSize, boxPlacement):
     box = newObject("Part::Box", name)
@@ -217,13 +251,13 @@ def cut(name, obj1, obj2):
     return cut
 
 
-def sketchToBox(baseName, planeOrigin, planeOrientation, sketchVectorList, direction):
+def sketchToBox(baseName, planeOrigin, planeOrientation, sketchVectorList, dirVector):
     plane  = newPlane(baseName+"Plane", planeOrigin, planeOrientation)
 
     sketch = newSketchOnPlane(baseName+"Sketch", plane)
     sketch = sketchClosedWire(sketch, sketchVectorList)
 
-    extrusion = extrudeSketch(baseName+"Extrusion", sketch, direction)
+    extrusion = extrudeSketch(baseName+"Extrusion", sketch, dirVector)
     return extrusion
 
 
@@ -432,3 +466,60 @@ def surfacePairToPad(baseName, surface1, surface2):
     faces2 = surfaceToFaces(surface2)
     pad = facePairsToPad(baseName, faces1, faces2)
     return pad
+
+def edgesToFace(name, edges):
+    recompute()
+    shape = Part.makeFilledFace(Part.__sortEdges__(edges))
+    if shape.isNull():
+        raise Exception("Failed to create face")
+
+    face = newObject("Part::Feature", name)
+    face.Shape = shape
+    return face
+
+def facesToShell(name, faces):
+    recompute()
+    shape = Part.Shell(faces)
+    if shape.isNull():
+        raise Exception("Failed to create shell")
+    shell = newObject("Part::Feature", name)
+    shell.Shape = shape
+    return shell
+
+
+def cappedSweepToShell(name, sweep, cap1, cap2):
+    faces = []
+    faces.extend(sweep.Shape.Faces)
+    faces.extend(cap1.Shape.Faces)
+    faces.extend(cap2.Shape.Faces)
+
+    shell = facesToShell(name, faces)
+    return shell
+
+def shellToSolid(name, shell):
+    shape = shell.Shape
+    if shape.ShapeType != 'Shell':
+        raise Exception("Part is not a shell")
+
+    solidShape = Part.Solid(shape)
+    if solidShape.isNull():
+        raise Exception("Failed to create shell")
+
+    solid = newObject("Part::Feature", name)
+    solid.Shape = solidShape
+    return solid
+
+
+def exportStl(objs, fname):
+    # TODO: clarify where relative path goes to
+    Mesh.export(objs, fname)
+    return
+
+
+def newHollowCylinder(name, innerRadius, outerRadius, height, placement):
+    innerCylinder = newCylinder(name+"Inner", innerRadius, height, placement)
+    cylinder = newCylinder(name+"Outer", outerRadius, height, placement)
+    cylinder = cut(name, cylinder, innerCylinder)
+    return cylinder
+
+## balbla
