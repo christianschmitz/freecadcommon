@@ -229,6 +229,14 @@ def extrudeSketch(name, sketch, dirVector):
     return extrusion
 
 
+def loft(name, sketches):
+    obj = newObject("Part::Loft", name)
+    obj.Sections = sketches
+    obj.Solid = True
+    obj.Ruled = False
+    obj.Closed = False
+    return obj
+
 # Combine obj1 and obj2 into a fusion part
 def fuse(name, objList):
     if (objList.__len__() == 1):
