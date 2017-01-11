@@ -1,14 +1,25 @@
+import math
+import os
+
 import FreeCAD as fc
 import Part, Sketcher, Draft, Mesh
-import math
 
 
-def newObject(feature, name):
+## Basic operations
+def autoName(feature):
+    numObjects = len(fc.ActiveDocument.Objects)
+    name = feature.split(':')[-1] + str(numObjects)
+    return name
+
+
+def newObject(feature):
+    name = autoName(feature)
     obj = fc.ActiveDocument.getObject(name)
-    # it is probably best to delete it if it exists, in order to start from a clean slate
     if (obj != None):
         fc.ActiveDocument.removeObject(name)
     obj = fc.ActiveDocument.addObject(feature, name)
+    if (hasattr(obj, "Label")):
+        obj.Label = name
 
     return obj
 
@@ -21,69 +32,246 @@ def show(obj):
     obj.ViewObject.show()
     return
 
+
 def hide(obj):
     obj.ViewObject.hide()
     return
 
+
 def hideAll():
-    for o in fc.ActiveDocument.Objects:
-        hide(o)
+    for obj in fc.ActiveDocument.Objects:
+        hide(obj)
     return 
+
 
 def showOnly(obj):
     hideAll()
     show(obj)
     return
 
+
 def deleteAll():
-    for o in fc.ActiveDocument.Objects:
-        name = o.Name
+    for obj in fc.ActiveDocument.Objects:
+        name = obj.Name
         fc.ActiveDocument.removeObject(name)
     return
 
-def newCylinder(name, radius, height, placement):
-    cylinder = newObject("Part::Cylinder", name)
-    cylinder.Label = name
+
+def cleanDocument():
+    if (None == fc.ActiveDocument):
+        name = "Unnamed"
+        fc.newDocument(name)
+        fc.setActiveDocument(name)
+    else:
+        deleteAll()
+    return
+
+
+def ezPlacement(x=0, y=0, z=0, u=0, v=0, w=0):
+    return fc.Placement(fc.Vector(x,y,z), 
+            fc.Rotation(u,v,w))
+
+
+def fuse(objects):
+    if (len(objects) == 1):
+        return objects[0]
+    else:
+        fusion = newObject("Part::MultiFuse")
+        fusion.Shapes = objects
+        return fusion
+
+
+# Remove obj2 from obj1 creating a new cut part
+def cut(obj1, obj2):
+    c = newObject("Part::Cut")
+    c.Base = obj1
+    c.Tool = obj2
+    c.Label = c.Name
+    return c
+
+
+# Left-most is most global (position vectors are left multiplied by matrices)
+def foldPlacements(placements):
+    matrix = placements[0].toMatrix()
+    for p in placements[1:]:
+        matrix = matrix*p.toMatrix()
+
+    return fc.Placement(matrix)
+
+
+# input: two lists
+def move(placements1, placements2):
+    folded2 = foldPlacements(placements2)
+    placements3 = []
+    for p in placements1:
+        placements3.append(foldPlacements([p, folded2]))
+    return placements3
+
+
+## Basic shapes
+def newBox(place, lx, ly, lz, relLocalPos = fc.Vector(0,0,0)):
+    box = newObject("Part::Box")
+    box.Length = lx
+    box.Width  = ly
+    box.Height = lz
+    box.Placement = foldPlacements([place,
+        ezPlacement(-lx*relLocalPos.x, -ly*relLocalPos.y, 
+            -lz*relLocalPos.z)])
+
+    return box
+
+
+def newCylinder(place, radius, height, relLocalPos = fc.Vector(0,0,0)):
+    cylinder = newObject("Part::Cylinder")
+    cylinder.Label = cylinder.Name
     cylinder.Radius = radius
     cylinder.Height = height
-    cylinder.Placement = placement
+
+    cylinder.Placement = foldPlacements([place, 
+        ezPlacement(-radius*relLocalPos.x, -radius*relLocalPos.y,
+            -height*relLocalPos.z)])
+
     return cylinder
 
-def newBox(name, boxSize, boxPlacement):
-    box = newObject("Part::Box", name)
-    box.Length = boxSize.x # x-axis
-    box.Width  = boxSize.y  # y-axis
-    box.Height = boxSize.z # z-axis
-    box.Placement = boxPlacement
 
-    return box
+def newSphere(place, radius, relPos = fc.Vector(0,0,0)):
+    sphere = newObject("Part::Sphere")
+    sphere.Label = sphere.Name
+    sphere.Radius = radius
 
-
-def centeredBox(name, boxSize, boxZ):
-    length = boxSize.x
-    width = boxSize.y
-    box = newBox(name, boxSize, fc.Placement(fc.Vector(-0.5*length, -0.5*width, boxZ), fc.Rotation(0,0,0)))
-    return box
-
-def moveTo(obj, placement):
-    obj.Placement = placement
-    return obj
+    sphere.Placement = foldPlacements([place,
+        ezPlacement(-radius*relPos.x, -radius*relPos.y, 
+            -radius*relPos.z)])
+    return sphere
 
 
-def newPlane(name, planeOrigin, planeOrientation):
-    plane = newObject("Part::Plane", name)
-    plane.Length = 10
-    plane.Width  = 10
+def newWedge(place, lx1, lx2, ly, lz, relPos = fc.Vector(0,0,0)):
+    wedge = newObject("Part::Wedge")
+    wedge.Xmin = 0
+    wedge.Ymin = 0
+    wedge.Zmin = 0
+    wedge.X2min= 0
+    wedge.Z2min= 0
+    wedge.Xmax = lx1
+    wedge.Ymax = ly1
+    wedge.Zmax = lz1
+    wedge.X2max = lx2
+    wedge.Z2max = lz1
+    wedge.Placement = foldPlacements([place,
+        ezPlacement(-max(lx1,lx2)*relPos.x, -ly1*relPos.y, -lz1*relPos.z)])
+    return wedge
 
-    plane = moveTo(plane, fc.Placement(planeOrigin, planeOrientation))
+
+def newSimpleEllipsoid(place, rx, ry, rz, latSouth=-90, latNorth=90, longitude=360,
+        relPos = fc.Vector(0,0,0)):
+    ellipsoid = newObject("Part::Ellipsoid")
+    ellipsoid.Radius1 = rz
+    ellipsoid.Radius2 = rx
+    ellipsoid.Radius3 = ry
+    ellipsoid.Angle1 = latSouth
+    ellipsoid.Angle2 = latNorth
+    ellipsoid.Angle3 = longitude
+    ellipsoid.Placement = foldPlacements([place,
+        ezPlacement(-rx*relPos.x, -ry*relPos.y, -rz*relPos.z)])
+    ellipsoid.Label = ellipsoid.Name
+    return ellipsoid
+
+
+def newPlane(place, lx = 10, ly = 10):
+    plane = newObject("Part::Plane")
+    plane.Length = lx
+    plane.Width  = ly
+    place.Placement = place
 
     return plane
 
 
-def newSketchOnPlane(name, plane):
-    sketch = newObject("Sketcher::SketchObject", name)
+def newSketch(plane):
+    sketch = newObject("Sketcher::SketchObject")
     sketch.Support = (plane,["Face1"])
     return sketch
+
+
+## Compound shapes
+def newHollowCylinder(place, innerRadius, outerRadius, height,
+        relLocalPos = fc.Vector(0,0,0)):
+    innerCylinder = newCylinder(place, innerRadius, height, relLocalPos)
+    cylinder = newCylinder(place, outerRadius, height, relLocalPos)
+    cylinder = cut(cylinder, innerCylinder)
+    return cylinder
+
+
+# TODO: angles
+def newHollowSphere(place, innerRadius, radius,
+        relPos = fc.Vector(0,0,0)):
+    innerSphere = newSphere(place, innerRadius, relPos)
+    sphere = newSphere(place, radius, relPos)
+    return cut(sphere, innerSphere)
+
+
+# TODO: input check
+def newEllipsoid(place, rx, ry, rz, latSouth=-90, latNorth=90, longWest=0, longEast=360,
+        relPos = fc.Vector(0,0,0)):
+    ellipsoid = newSimpleEllipsoid(place, rx, ry, rz, latSouth, latNorth, longEast, relPos)
+    if not (longWest == 0):
+        if (longWest > 0):
+            ellipsoidWest = newSimpleEllipsoid(place, rx, ry, rz, latSouth, latNorth, longWest, relPos)
+            ellipsoid = cut(ellipsoid, ellipsoidWest)
+        elif (longWest < 0):
+            ellipsoidWest = newSimpleEllipsoid(place, rx, ry, rz, latSouth, latNorth, 360, relPos)
+            ellipsoidWestCut = newSimpleEllipsoid(place, rx, ry, rz, latSouth, latNorth, 360+longWest, relPos)
+            ellipsoidWest = cut(ellipsoidWest, ellipsoidWestCut)
+            ellipsoid = fuse([ellipsoid, ellipsoidWest])
+    return ellipsoid
+
+
+def newHollowEllipsoid(place, innerRx, rx, ry, rz, 
+        latSouth=-90, latNorth=90, longWest =0, longEast=360,
+        relPos = fc.Vector(0,0,0)):
+    a = innerRx/float(rx)
+    aInv = 1.0/a
+    innerEllipsoid = newEllipsoid(place, innerRx, a*ry, a*rz, 
+            latSouth, latNorth, longWest, longEast, relPos*aInv)
+    ellipsoid = newEllipsoid(place, rx, ry, rz,
+            latSouth, latNorth, longWest, longEast, relPos)
+
+    return cut(ellipsoid, innerEllipsoid)
+
+
+# rz1 = bottom oval radius
+# rz2 = top oval radius
+def newOval(place_, rx, ry, rz1, rz2,
+        latSouth = -90, latNorth=90, longWest=0, longEast=360,
+        relPos = fc.Vector(0,0,0)):
+
+    if relPos[2] < 0:
+        z = -relPos[2]*rz1
+    else:
+        z = -relPos[2]*rz2
+
+    diff = ezPlacement(-rx*relPos[0], -ry*relPos[1], z)
+
+    place = foldPlacements([place_, diff])
+    ellipsoids = []
+    if latNorth > 0:
+        ellipsoids.append(newEllipsoid(place, rx, ry, rz2, 0, latNorth, longWest, longEast))
+    if latSouth < 0:
+        ellipsoids.append(newEllipsoid(place, rx, ry, rz1, latSouth, 0, longWest, longEast))
+
+    oval = fuse(ellipsoids)
+    return oval
+
+
+def newHollowOval(place, innerRx, rx, ry, rz1, rz2,
+        latSouth=-90, latNorth=90, longWest=0, longEast=360,
+        relPos = fc.Vector(0,0,0)):
+    a = innerRx/float(rx)
+    aInv = 1.0/a
+    innerOval = newOval(place, innerRx, a*ry, a*rz1, a*rz2,
+            latSouth, latNorth, longWest, longEast, relPos*a)
+    oval = newOval(place, rx, ry, rz1, rz2,
+            latSouth, latNorth, longWest, longEast, relPos)
+    return cut(oval, innerOval)
 
 
 def sketchClosedWire(sketch, vectorList):
@@ -229,26 +417,13 @@ def extrudeSketch(name, sketch, dirVector):
     return extrusion
 
 
-# Combine obj1 and obj2 into a fusion part
-def fuse(name, objList):
-    if (objList.__len__() == 1):
-        return objList[0]
-    else:
-        fusion = newObject("Part::MultiFuse", name)
-        fusion.Shapes = objList
-        return fusion
-
-
-def boolFuse(name, obj1, obj2):
-    return fuse(name, [obj1, obj2])
-
-
-# Remove obj2 from obj1 creating a new cut part
-def cut(name, obj1, obj2):
-    cut = newObject("Part::Cut", name)
-    cut.Base = obj1
-    cut.Tool = obj2
-    return cut
+def loft(name, sketches):
+    obj = newObject("Part::Loft", name)
+    obj.Sections = sketches
+    obj.Solid = True
+    obj.Ruled = False
+    obj.Closed = False
+    return obj
 
 
 def sketchToBox(baseName, planeOrigin, planeOrientation, sketchVectorList, dirVector):
@@ -284,8 +459,6 @@ def rotationToNormal(rotation):
     vector = rotateVector(fc.Vector(0,0,1), rotation)
     vectorOut = vector.normalize()
     return vectorOut
-
-
 
 
 # Returns two objects!
@@ -376,7 +549,12 @@ def surfaceToFaces(surface):
 
 def faceToWire(face):
     recompute()
-    wire = Draft.downgrade(face)[0][0]
+    obj = Draft.downgrade(face)[0]
+    if (len(obj) == 1):
+        wire = obj[0]
+    else:
+        raise Exception("Error in faceToWire: downgrade failed")
+
     return wire
 
 
@@ -518,23 +696,68 @@ def shellToSolid(name, shell):
 
 
 def exportStl(objs, fname):
-    # TODO: clarify where relative path goes to
-    Mesh.export(objs, fname)
+    if not isinstance(objs, list):
+        raise Exception("input to exportStl() must be a list")
+    Mesh.export(objs, os.path.abspath(fname))
     return
 
 
-def newHollowCylinder(name, innerRadius, outerRadius, height, placement):
-    innerCylinder = newCylinder(name+"Inner", innerRadius, height, placement)
-    cylinder = newCylinder(name+"Outer", outerRadius, height, placement)
-    cylinder = cut(name, cylinder, innerCylinder)
-    return cylinder
 
 
-def assertCleanDocument():
-    if (None == fc.ActiveDocument):
-        name = "Unnamed"
-        fc.newDocument(name)
-        fc.setActiveDocument(name)
+
+def extrudeFace(name, face, dirVector):
+    wire = faceToWire(face)
+    solid = extrudeSketch(name, wire, dirVector)
+    return solid
+
+
+def genObjects(placements, fn, isFused = True):
+    solids = []
+    for p in placements:
+        solids.append(fn(p))
+
+    if (isFused):
+        return fuse(solids)
     else:
-        deleteAll()
-    return
+        return solids
+
+
+# apply a series of fuses and cuts to solids
+# returns a solid
+# the component functions must return solids as well
+# the components dict acts like a cache
+def generateConfiguration(componentI, configurations, params, components = {}):
+    solid = None
+
+    component = None
+    if isinstance(componentI, dict):
+        component = componentI
+    else:
+        component = configurations[componentI]
+
+    if isinstance(component, dict):
+        if not len(component) == 1:
+            raise Exception("Configuration dict can only have one entry\n")
+        elif "fuse" in component:
+            solids = []
+            for compId in component["fuse"]:
+                solids.append(generateConfiguration(compId, configurations, params, components))
+            solid = fuse(solids)
+        elif "cut" in component:
+            compIds = component["cut"]
+            solid1 = generateConfiguration(compIds[0], configurations, params, components)
+            solid2 = generateConfiguration(compIds[1], configurations, params, components)
+            solid = cut(solid1, solid2)
+        else:
+            op = ""
+            for key in component:
+                op = key
+            raise Exception("Operation \n" + op + "\" not recognized")
+    else: # needs to be a function
+        if componentI in components:
+            solid = components[componentI]
+        else:
+            solid = component(params)
+            components[componentI] = solid
+
+    return solid
