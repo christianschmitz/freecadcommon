@@ -67,6 +67,9 @@ def cleanDocument():
     return
 
 
+# u: around local z-axis
+# v: around local y-axis
+# w: around local x-axis
 def ezPlacement(x=0, y=0, z=0, u=0, v=0, w=0):
     return fc.Placement(fc.Vector(x,y,z), 
             fc.Rotation(u,v,w))
@@ -181,7 +184,7 @@ def newPlane(place, lx = 10, ly = 10):
     plane = newObject("Part::Plane")
     plane.Length = lx
     plane.Width  = ly
-    place.Placement = place
+    plane.Placement = place
 
     return plane
 
@@ -491,25 +494,24 @@ def simplePocket(workpiece, baseName, planeOrigin, planeOrientation, sketchVecto
     return workpiece
 
 
-def singleCopy(name, obj, placement):
-    objCopy = newObject("Part::Feature", name)
+def singleCopy(obj, placement):
+    objCopy = newObject("Part::Feature")
     objCopy.Shape = obj.Shape
     objCopy.Placement = placement
     return objCopy
     
 
-def manyCopies(baseName, obj, placements):
+def manyCopies(obj, placements):
     objCopies = []
     for i in range(placements.__len__()):
-        name = baseName+str(i)
-        objCopy = singleCopy(name, obj, placements[i])
+        objCopy = singleCopy(obj, placements[i])
         objCopies.append(objCopy)
 
     return objCopies
 
 
 def removeMany(baseName, workpiece, tool, placementList):
-    objectCopies = manyCopies(baseName, tool, placementList)
+    objectCopies = manyCopies(tool, placementList)
     fusedCopies = fuse(baseName+"Fuse", objectCopies)
     workpiece = cut(baseName+"Cut", workpiece, fusedCopies)
 
@@ -530,7 +532,7 @@ def polyArcSketch(baseName, planeOrigin, planeOrientation, vertexList):
 
 
 def sketchesToSweep(name, sweepSketches, spineSketch):
-    sweep = newObject('Part::Sweep', name)
+    sweep = newObject('Part::Sweep')
     sweep.Sections = sweepSketches
     sweep.Spine = (spineSketch,["Edge1"])
     sweep.Solid = False
@@ -567,7 +569,7 @@ def facesToWires(faces):
 
  
 def wirePairToRuledSurface(name, wire1, wire2):
-    ruledSurface = newObject("Part::RuledSurface", name)
+    ruledSurface = newObject("Part::RuledSurface")
     ruledSurface.Curve1 = (wire1,[''])
     ruledSurface.Curve2 = (wire2,[''])
     return ruledSurface
@@ -589,7 +591,7 @@ def facesToShell(name, faces):
     _ = Part.Shell(faces)
     if _.isNull():
         raise RuntimeError('Error: failed to create shell')
-    shell = newObject("Part::Feature", name)
+    shell = newObject("Part::Feature")
     shell.Shape = _.removeSplitter()
     del _
     return shell
@@ -621,7 +623,7 @@ def shellToSolid(baseName, shell):
     _ = Part.Solid(shell.Shape)
     if _.isNull():
         raise RuntimeError('Error: failed to create solid')
-    solid = newObject("Part::Feature", baseName+"Solid")
+    solid = newObject("Part::Feature")
     solid.Shape = _.removeSplitter()
     return solid
 
@@ -658,7 +660,7 @@ def edgesToFace(name, edges):
     if shape.isNull():
         raise Exception("Failed to create face")
 
-    face = newObject("Part::Feature", name)
+    face = newObject("Part::Feature")
     face.Shape = shape
     return face
 
@@ -667,7 +669,7 @@ def facesToShell(name, faces):
     shape = Part.Shell(faces)
     if shape.isNull():
         raise Exception("Failed to create shell")
-    shell = newObject("Part::Feature", name)
+    shell = newObject("Part::Feature")
     shell.Shape = shape
     return shell
 
@@ -690,7 +692,7 @@ def shellToSolid(name, shell):
     if solidShape.isNull():
         raise Exception("Failed to create shell")
 
-    solid = newObject("Part::Feature", name)
+    solid = newObject("Part::Feature")
     solid.Shape = solidShape
     return solid
 
@@ -731,10 +733,12 @@ def generateConfiguration(componentI, configurations, params, components = {}):
     component = None
 
     if isinstance(componentI, dict):
-        component = componentI
+        component = componentI # TODO: does this really happen?
     else:
         component = configurations[componentI]
 
+    if not isinstance(componentI, dict) and componentI in components: 
+        solid = components[componentI]
     if isinstance(component, dict):
         if not len(component) == 1:
             raise Exception("Configuration dict can only have one entry\n")
@@ -748,16 +752,34 @@ def generateConfiguration(componentI, configurations, params, components = {}):
             solid1 = generateConfiguration(compIds[0], configurations, params, components)
             solid2 = generateConfiguration(compIds[1], configurations, params, components)
             solid = cut(solid1, solid2)
+
+        elif "pattern" in component:
+            placements = component["pattern"][0]
+            baseId = component["pattern"][1]
+            baseSolid = generateConfiguration(baseId, configurations, params, components)
+            copiedSolids = manyCopies(baseSolid, placements)
+            solid = fuse(copiedSolids)
         else:
             op = ""
             for key in component:
                 op = key
             raise Exception("Operation \n" + op + "\" not recognized")
-    else: # needs to be a function
+
+        recompute()
+        if not isinstance(componentI, dict):
+            if not componentI in components:
+                components[componentI] = solid
+            if "intermStlPrefix" in params:
+                exportStl([solid], params["intermStlPrefix"] + str(componentI) + ".stl")
+
+    else: # needs to be a generating function
         if componentI in components:
             solid = components[componentI]
         else:
             solid = component(params)
             components[componentI] = solid
+            recompute()
+            if "intermStlPrefix" in params:
+                exportStl([solid], params["intermStlPrefix"] + str(componentI) + ".stl")
 
     return solid
