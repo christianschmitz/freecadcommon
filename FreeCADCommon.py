@@ -93,6 +93,13 @@ def cut(obj1, obj2):
     return c
 
 
+# venn diagram intersection
+def intersect(objs):
+    i = newObject('Part::MultiCommon')
+    i.Shapes = objs
+    return i
+
+
 # Left-most is most global (position vectors are left multiplied by matrices)
 def foldPlacements(placements):
     matrix = placements[0].toMatrix()
@@ -148,20 +155,21 @@ def newSphere(place, radius, relPos = fc.Vector(0,0,0)):
     return sphere
 
 
-def newWedge(place, lx1, lx2, ly, lz, relPos = fc.Vector(0,0,0)):
+def newWedge(place, lx, ly, lz, lx2, lz2, offsetX2 = 0.0, offsetZ2 = 0.0, relPos = fc.Vector(0,0,0)):
     wedge = newObject("Part::Wedge")
     wedge.Xmin = 0
     wedge.Ymin = 0
     wedge.Zmin = 0
-    wedge.X2min= 0
-    wedge.Z2min= 0
-    wedge.Xmax = lx1
-    wedge.Ymax = ly1
-    wedge.Zmax = lz1
+    wedge.X2min= offsetX2
+    wedge.Z2min= offsetZ2
+    wedge.Xmax = lx
+    wedge.Ymax = ly
+    wedge.Zmax = lz
     wedge.X2max = lx2
-    wedge.Z2max = lz1
+    wedge.Z2max = lz2
+
     wedge.Placement = foldPlacements([place,
-        ezPlacement(-max(lx1,lx2)*relPos.x, -ly1*relPos.y, -lz1*relPos.z)])
+        ezPlacement(-lx*relPos.x, -ly*relPos.y, -lz*relPos.z)])
     return wedge
 
 
@@ -410,12 +418,11 @@ def sketchPolyArc(sketch, vertexList):
 
     return sketch
 
-def extrudeSketch(name, sketch, dirVector):
-    extrusion = newObject("Part::Extrusion", name)
+def extrudeSketch(sketch, dirVector):
+    extrusion = newObject("Part::Extrusion")
     extrusion.Base = sketch
     extrusion.Solid = (True)
     extrusion.Dir = dirVector
-    extrusion.Label = name
     extrusion.TaperAngle = (0)
     return extrusion
 
@@ -430,12 +437,12 @@ def loft(name, sketches):
 
 
 def sketchToBox(baseName, planeOrigin, planeOrientation, sketchVectorList, dirVector):
-    plane  = newPlane(baseName+"Plane", planeOrigin, planeOrientation)
+    plane  = newPlane(fc.Placement(planeOrigin, planeOrientation))
 
     sketch = newSketchOnPlane(baseName+"Sketch", plane)
     sketch = sketchClosedWire(sketch, sketchVectorList)
 
-    extrusion = extrudeSketch(baseName+"Extrusion", sketch, dirVector)
+    extrusion = extrudeSketch(sketch, dirVector)
     return extrusion
 
 
@@ -525,7 +532,7 @@ def scaledCopy(obj, center, scaleFactor):
 
 
 def polyArcSketch(baseName, planeOrigin, planeOrientation, vertexList):
-    plane = newPlane(baseName+"Plane", planeOrigin, planeOrientation)
+    plane = newPlane(fc.Placement(planeOrigin, planeOrientation))
     sketch = newSketchOnPlane(baseName, plane)
     sketch = sketchPolyArc(sketch, vertexList)
     return sketch
